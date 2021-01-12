@@ -26,6 +26,9 @@ class ArticlesController < ApplicationController
                   handle_user_or_organization_feed
                 elsif params[:tag]
                   handle_tag_feed
+                elsif request.path == latest_feed_path
+                  @articles.where("score > ?", Articles::Feeds::LargeForemExperimental::MINIMUM_SCORE_LATEST_FEED)
+                    .includes(:user)
                 else
                   @articles.where(featured: true).includes(:user)
                 end
@@ -88,7 +91,7 @@ class ArticlesController < ApplicationController
       processed_html = parsed_markdown.finalize
     rescue StandardError => e
       @article = Article.new(body_markdown: params[:article_body])
-      @article.errors[:base] << ErrorMessageCleaner.new(e.message).clean
+      @article.errors[:base] << ErrorMessages::Clean.call(e.message)
     end
 
     respond_to do |format|

@@ -81,13 +81,14 @@ RSpec.describe Organization, type: :model do
       expect(article.elasticsearch_doc.dig("_source", "organization", "name")).to eq(new_org_name)
     end
 
-    it "on destroy removes data from elasticsearch" do
+    it "on destroy updates related article data" do
       article = create(:article, organization: organization)
-      sidekiq_perform_enqueued_jobs
+      drain_all_sidekiq_jobs
       expect(article.elasticsearch_doc.dig("_source", "organization", "id")).to eq(organization.id)
       organization.destroy
       sidekiq_perform_enqueued_jobs
       expect(article.elasticsearch_doc.dig("_source", "organization")).to be_nil
+      expect(article.reload.cached_organization).to be_nil
     end
   end
 

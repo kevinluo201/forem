@@ -100,7 +100,7 @@ class Article < ApplicationRecord
   after_update_commit :update_notifications, if: proc { |article|
                                                    article.notifications.any? && !article.saved_changes.empty?
                                                  }
-  after_commit :async_score_calc, :update_main_image_background_hex, :touch_collection, on: %i[create update]
+  after_commit :async_score_calc, :touch_collection, on: %i[create update]
   after_commit :index_to_elasticsearch, on: %i[create update]
   after_commit :remove_from_elasticsearch, on: [:destroy]
 
@@ -112,9 +112,10 @@ class Article < ApplicationRecord
 
   scope :admin_published_with, lambda { |tag_name|
     published
-      .where(user_id: SiteConfig.staff_user_id)
-      .order(published_at: :desc)
-      .tagged_with(tag_name)
+      .where(user_id: User.with_role(:super_admin)
+                          .union(User.with_role(:admin))
+                          .union(id: [SiteConfig.staff_user_id, SiteConfig.mascot_user_id].compact)
+                          .select(:id)).order(published_at: :desc).tagged_with(tag_name)
   }
 
   scope :user_published_with, lambda { |user_id, tag_name|
@@ -379,6 +380,10 @@ class Article < ApplicationRecord
                    spaminess_rating: BlackBox.calculate_spaminess(self))
   end
 
+  def co_author_ids_list=(list_of_co_author_ids)
+    self.co_author_ids = list_of_co_author_ids.split(",").map(&:strip)
+  end
+
   private
 
   def search_score
@@ -405,7 +410,7 @@ class Article < ApplicationRecord
 
     self.cached_user_name = user_name
     self.cached_user_username = user_username
-    self.path = calculated_path
+    self.path = calculated_path.downcase
   end
 
   def evaluate_markdown
@@ -423,7 +428,7 @@ class Article < ApplicationRecord
 
     self.description = processed_description if description.blank?
   rescue StandardError => e
-    errors[:base] << ErrorMessageCleaner.new(e.message).clean
+    errors[:base] << ErrorMessages::Clean.call(e.message)
   end
 
   def set_tag_list(tags)
@@ -432,17 +437,10 @@ class Article < ApplicationRecord
     self.tag_list = tag_list.map { |tag| Tag.find_preferred_alias_for(tag) }
   end
 
-  def update_main_image_background_hex
-    return unless saved_changes.key?("main_image")
-    return if main_image.blank? || main_image_background_hex_color != "#dddddd"
-
-    Articles::UpdateMainImageBackgroundHexWorker.perform_async(id)
-  end
-
   def detect_human_language
     return if language.present?
 
-    update_column(:language, LanguageDetector.new(self).detect)
+    update_column(:language, Articles::DetectLanguage.call(self))
   end
 
   def async_score_calc
@@ -612,13 +610,8 @@ class Article < ApplicationRecord
   end
 
   def update_cached_user
-    if organization
-      self.cached_organization = Articles::CachedEntity.from_object(organization)
-    end
-
-    return unless user
-
-    self.cached_user = Articles::CachedEntity.from_object(user)
+    self.cached_organization = organization ? Articles::CachedEntity.from_object(organization) : nil
+    self.cached_user = user ? Articles::CachedEntity.from_object(user) : nil
   end
 
   def set_all_dates
@@ -667,9 +660,9 @@ class Article < ApplicationRecord
   end
 
   def bust_cache
-    CacheBuster.bust(path)
-    CacheBuster.bust("#{path}?i=i")
-    CacheBuster.bust("#{path}?preview=#{password}")
+    EdgeCache::Bust.call(path)
+    EdgeCache::Bust.call("#{path}?i=i")
+    EdgeCache::Bust.call("#{path}?preview=#{password}")
     async_bust
   end
 
@@ -695,8 +688,8 @@ class Article < ApplicationRecord
       author_id: SiteConfig.mascot_user_id,
       noteable_id: user_id,
       noteable_type: "User",
-      reason: "automatic_ban",
-      content: "User banned for too many spammy articles, triggered by autovomit.",
+      reason: "automatic_suspend",
+      content: "User suspended for too many spammy articles, triggered by autovomit.",
     )
   end
 

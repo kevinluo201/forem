@@ -27,8 +27,10 @@ class SiteConfig < RailsSettings::Base
   # Authentication
   field :allow_email_password_registration, type: :boolean, default: false
   field :allow_email_password_login, type: :boolean, default: true
+  field :allowed_registration_email_domains, type: :array, default: %w[]
+  field :display_email_domain_allow_list_publicly, type: :boolean, default: false
   field :require_captcha_for_email_password_registration, type: :boolean, default: false
-  field :authentication_providers, type: :array, default: proc { Authentication::Providers.available }
+  field :authentication_providers, type: :array, default: %w[]
   field :invite_only_mode, type: :boolean, default: false
   field :twitter_key, type: :string, default: ApplicationConfig["TWITTER_KEY"]
   field :twitter_secret, type: :string, default: ApplicationConfig["TWITTER_SECRET"]
@@ -36,6 +38,10 @@ class SiteConfig < RailsSettings::Base
   field :github_secret, type: :string, default: ApplicationConfig["GITHUB_SECRET"]
   field :facebook_key, type: :string
   field :facebook_secret, type: :string
+  field :apple_client_id, type: :string
+  field :apple_key_id, type: :string
+  field :apple_pem, type: :string
+  field :apple_team_id, type: :string
 
   # Campaign
   field :campaign_call_to_action, type: :string, default: "Share your project"
@@ -48,6 +54,9 @@ class SiteConfig < RailsSettings::Base
 
   # Community Content
   field :community_name, type: :string, default: ApplicationConfig["COMMUNITY_NAME"] || "New Forem"
+  field :community_emoji, type: :string, default: "🌱"
+  # collective_noun and collective_noun_disabled have been added back temporarily for
+  # a data_update script, but will be removed in a future PR!
   field :collective_noun, type: :string, default: "Community"
   field :collective_noun_disabled, type: :boolean, default: false
   field :community_description, type: :string
@@ -63,6 +72,7 @@ class SiteConfig < RailsSettings::Base
   # Emails
   field :email_addresses, type: :hash, default: {
     default: ApplicationConfig["DEFAULT_EMAIL"],
+    contact: ApplicationConfig["DEFAULT_EMAIL"],
     business: ApplicationConfig["DEFAULT_EMAIL"],
     privacy: ApplicationConfig["DEFAULT_EMAIL"],
     members: ApplicationConfig["DEFAULT_EMAIL"]
@@ -86,7 +96,7 @@ class SiteConfig < RailsSettings::Base
   # Images
   field :main_social_image, type: :string, default: proc { URL.local_image("social-media-cover.png") }
 
-  field :favicon_url, type: :string, default: "favicon.ico"
+  field :favicon_url, type: :string, default: proc { URL.local_image("favicon.ico") }
   field :logo_png, type: :string, default: proc { URL.local_image("icon.png") }
 
   field :logo_svg, type: :string
@@ -205,4 +215,15 @@ class SiteConfig < RailsSettings::Base
   def self.dev_to?
     app_domain == "dev.to"
   end
+
+  # Apple uses different keys than the usual `PROVIDER_NAME_key` or
+  # `PROVIDER_NAME_secret` so these will help the generalized authentication
+  # code to work, i.e. https://github.com/forem/forem/blob/master/app/helpers/authentication_helper.rb#L26-L29
+  def self.apple_key
+    return unless apple_client_id.present? && apple_key_id.present? &&
+      apple_pem.present? && apple_team_id.present?
+
+    "present"
+  end
+  singleton_class.__send__(:alias_method, :apple_secret, :apple_key)
 end

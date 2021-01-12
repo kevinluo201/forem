@@ -41,8 +41,6 @@ class UserPolicy < ApplicationPolicy
     instagram_url
     linkedin_url
     location
-    looking_for_work
-    looking_for_work_publicly
     mastodon_url
     medium_url
     mobile_comment_notifications
@@ -76,10 +74,6 @@ class UserPolicy < ApplicationPolicy
   end
 
   def update?
-    current_user?
-  end
-
-  def update_language_settings?
     current_user?
   end
 

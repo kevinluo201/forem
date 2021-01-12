@@ -1,10 +1,10 @@
 module Articles
   module Feeds
     class LargeForemExperimental
-      RANDOM_OFFSET_VALUES = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].freeze
+      include FieldTest::Helpers
       MINIMUM_SCORE_LATEST_FEED = -20
 
-      def initialize(user: nil, number_of_articles: 35, page: 1, tag: nil)
+      def initialize(user: nil, number_of_articles: 50, page: 1, tag: nil)
         @user = user
         @number_of_articles = number_of_articles
         @page = page
@@ -36,10 +36,15 @@ module Articles
         articles
       end
 
-      # Timeframe values from Timeframer::DATETIMES
+      # Timeframe values from Timeframe::DATETIMES
       def top_articles_by_timeframe(timeframe:)
-        published_articles_by_tag.where("published_at > ?", Timeframer.new(timeframe).datetime)
+        published_articles_by_tag.where("published_at > ?", Timeframe.datetime(timeframe))
           .order(score: :desc).page(@page).per(@number_of_articles)
+      end
+
+      def default_home_feed(user_signed_in: false)
+        _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: user_signed_in, ranking: true)
+        stories
       end
 
       def latest_feed
@@ -54,88 +59,15 @@ module Articles
         [featured_story, hot_stories]
       end
 
-      # Test variation: Base
-      def default_home_feed(user_signed_in: false)
-        _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: user_signed_in, ranking: true)
-        stories
-      end
-
-      def more_tag_weight_more_random_experiment
-        @tag_weight = 2
-        @randomness = 7
-        _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: true)
-        stories
-      end
-
-      # Test variation: the more comments a post has, the higher it's rated!
-      def more_comments_experiment
-        @comment_weight = 2
-        _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: true)
-        stories
-      end
-
-      # Test variation: the more comments a post has, the higher it's rated!
-      def more_comments_medium_weight_experiment
-        @comment_weight = 0.5
-        _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: true)
-        stories
-      end
-
-      # Test variation: the more comments a post has, the higher it's rated!
-      def more_comments_minimal_weight_experiment
+      def more_comments_minimal_weight
         @comment_weight = 0.2
         _featured_story, stories = default_home_feed_and_featured_story(user_signed_in: true)
         stories
       end
 
-      def mix_of_everything_experiment
-        case rand(7)
-        when 0
-          default_home_feed(user_signed_in: true)
-        when 1
-          more_tag_weight_more_random_experiment
-        when 2
-          more_comments_experiment
-        when 3
-          more_tag_weight_randomized_at_end_experiment
-        when 4
-          more_comments_randomized_at_end_experiment
-        when 5
-          more_comments_medium_weight_randomized_at_end_experiment
-        when 6
-          more_comments_minimal_weight_randomized_at_end_experiment
-        else
-          default_home_feed(user_signed_in: true)
-        end
-      end
-
-      # Randomized at end group for next three experiments
-      # Rather than randomizing *during* the ranking, rank solely by quality/match
-      # and randomize the top half of the ranked results.
-      # Resulting in more relevance and still more freshness.
-
-      def more_tag_weight_randomized_at_end_experiment
+      def more_comments_minimal_weight_randomized_at_end
         @randomness = 0
-        @tag_weight = 2
-        _featured_story, results = default_home_feed_and_featured_story(user_signed_in: true)
-        first_half(results).shuffle + last_half(results)
-      end
-
-      def more_comments_randomized_at_end_experiment
-        @randomness = 0
-        results = more_comments_experiment
-        first_half(results).shuffle + last_half(results)
-      end
-
-      def more_comments_medium_weight_randomized_at_end_experiment
-        @randomness = 0
-        results = more_comments_medium_weight_experiment
-        first_half(results).shuffle + last_half(results)
-      end
-
-      def more_comments_minimal_weight_randomized_at_end_experiment
-        @randomness = 0
-        results = more_comments_minimal_weight_experiment
+        results = more_comments_minimal_weight
         first_half(results).shuffle + last_half(results)
       end
 
@@ -194,25 +126,73 @@ module Articles
       end
 
       def globally_hot_articles(user_signed_in)
-        hot_stories = published_articles_by_tag
-          .where("score > ? OR featured = ?", SiteConfig.home_feed_minimum_score, true)
-          .order(hotness_score: :desc)
-        featured_story = hot_stories.where.not(main_image: nil).first
         if user_signed_in
-          hot_story_count = hot_stories.count
-          offset = RANDOM_OFFSET_VALUES.select do |i|
-            i < hot_story_count
-          end.sample # random offset, weighted more towards zero
-          hot_stories = hot_stories.offset(offset)
+          hot_stories = experimental_hot_story_grab
+          featured_story = hot_stories.where.not(main_image: nil).first
           new_stories = Article.published
             .where("score > ?", -15)
             .limited_column_select.includes(top_comments: :user).order(published_at: :desc).limit(rand(15..80))
           hot_stories = hot_stories.to_a + new_stories.to_a
+        else
+          hot_stories = Article.published.limited_column_select
+            .page(@page).per(@number_of_articles)
+            .where("score >= ? OR featured = ?", SiteConfig.home_feed_minimum_score, true)
+            .order(hotness_score: :desc)
+          featured_story = hot_stories.where.not(main_image: nil).first
         end
         [featured_story, hot_stories.to_a]
       end
 
       private
+
+      # Disable complexity cop to allow for variant-driven method
+      # rubocop:disable Metrics/CyclomaticComplexity
+      def experimental_hot_story_grab
+        test_variant = @user ? field_test(:feed_top_articles_query, participant: @user) : "base"
+        case test_variant
+        when "base_with_more_articles" # equivalent to current base but with higher "number of articles"
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .page(@page).per(75)
+            .where("score >= ? OR featured = ?", SiteConfig.home_feed_minimum_score, true)
+            .order(hotness_score: :desc)
+        when "only_followed_tags" # equivalent to base but only on tags user follows (if user follows enough)
+          followed_tags = @user.cached_followed_tag_names
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .page(@page).per(@number_of_articles)
+            .where("score >= ? OR featured = ?", SiteConfig.home_feed_minimum_score, true)
+            .order(hotness_score: :desc)
+          # We only want to limit the posts to tagged_with if the participant follows enough tags.
+          articles = articles.tagged_with(followed_tags, any: true) if followed_tags.size > 4
+        when "top_articles_since_last_pageview_3_days_max" # Top articles since last page view (max 3 days)
+          start_time = [(@user.page_views.last&.created_at || 3.days.ago) - 12.hours, 3.days.ago].max
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .where("published_at > ?", start_time)
+            .page(@page).per(@number_of_articles)
+            .order(score: :desc)
+        when "top_articles_since_last_pageview_7_days_max" # Top articles since last page view (max 7 days)
+          start_time = [(@user.page_views.last&.created_at || 7.days.ago) - 12.hours, 7.days.ago].max
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .where("published_at > ?", start_time)
+            .page(@page).per(@number_of_articles)
+            .order(score: :desc)
+        when "combination_only_tags_followed_and_top_max_7_days" # Top articles since last page view (max 7 days)
+          start_time = [(@user.page_views.last&.created_at || 7.days.ago) - 12.hours, 7.days.ago].max
+          followed_tags = @user.cached_followed_tag_names
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .where("published_at > ?", start_time)
+            .page(@page).per(@number_of_articles)
+            .order(score: :desc)
+          # We only want to limit the posts to tagged_with if the participant follows enough tags.
+          articles = articles.tagged_with(followed_tags, any: true) if followed_tags.size > 4
+        else # "base"
+          articles = Article.published.limited_column_select.includes(top_comments: :user)
+            .page(@page).per(@number_of_articles)
+            .where("score >= ? OR featured = ?", SiteConfig.home_feed_minimum_score, true)
+            .order(hotness_score: :desc)
+        end
+        articles
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity
 
       def user_followed_tags
         @user_followed_tags ||= (@user&.decorate&.cached_followed_tags || [])

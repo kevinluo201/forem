@@ -615,6 +615,7 @@
     (),
     false
   ),
+  ('fs', 'font-style', ('italic': italic, 'normal': normal), (), false),
   (
     'text',
     'text-transform',
@@ -727,5 +728,12 @@
     ),
     (),
     true
+  ),
+  (
+    'resize',
+    'resize',
+    ('x': horizontal, 'y': vertical, 'none': none),
+    (),
+    false
   )
 );

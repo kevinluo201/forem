@@ -48,6 +48,9 @@
 <% end %>
 
 <% if internal_navigation? %>
+  <!-- If you have service workers turned on, you may be seeing the canonical URL in the body for human inspection -->
+  <!-- However, the crawled version of the page has the canonical in the head. -->
+  <!-- This is confirmed by the canonical url inspector. See https://github.com/forem/forem/issues/9509#issuecomment-732259221. -->
   <link rel="canonical" href="<%= @article.canonical_url.presence || app_url(@article.path) %>" />
   <meta name="description" content="<%= @article.description_and_tags %>">
   <%= meta_keywords_article(@article.cached_tag_list) %>
@@ -61,7 +64,7 @@
     <meta property="og:url" content="<%= article_url(@article) %>" />
     <meta property="og:title" content="<%= @article.title %>" />
     <meta property="og:description" content="<%= @article.description || "An article from the community" %>" />
-    <meta property="og:site_name" content="<%= community_qualified_name %>" />
+    <meta property="og:site_name" content="<%= community_name %>" />
     <meta name="twitter:site" content="@<%= SiteConfig.social_media_handles["twitter"] %>">
     <meta name="twitter:creator" content="@<%= @user.twitter_username %>">
     <meta name="twitter:title" content="<%= @article.title %>">
@@ -222,7 +225,8 @@
   <% if has_vid?(@article) %>
     <%= render "articles/fitvids" %>
   <% end %>
-  <% if @article.processed_html.include? 'class="twitter-tweet"' %>
+  <% if @article.processed_html.include?('class="twitter-tweet"') ||
+       @article.processed_html.include?("ltag_twitter_timeline-liquid-tag") %>
     <script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
   <% end %>
   <% if @article.processed_html.include? "instagram-media" %>
@@ -245,5 +249,4 @@
     <%== TweetTag.script %>
     <%== UserSubscriptionTag.script %>
   </script>
-  <%== TwitterTimelineTag.script %>
 <% end %>

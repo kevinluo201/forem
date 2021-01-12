@@ -74,18 +74,63 @@ RSpec.describe "/admin/config", type: :request do
 
       describe "Authentication" do
         it "updates enabled authentication providers" do
-          enabled = Authentication::Providers.available.first.to_s
-          post "/admin/config", params: { site_config: { auth_providers_to_enable: enabled },
-                                          confirmation: confirmation_message }
+          enabled = Authentication::Providers.available.last.to_s
+          post admin_config_path, params: {
+            site_config: {
+              "#{enabled}_key": "someKey",
+              "#{enabled}_secret": "someSecret",
+              auth_providers_to_enable: enabled
+            },
+            confirmation: confirmation_message
+          }
           expect(SiteConfig.authentication_providers).to eq([enabled])
         end
 
         it "strips empty elements" do
-          provider = Authentication::Providers.available.first.to_s
+          provider = Authentication::Providers.available.last.to_s
           enabled = "#{provider}, '', nil"
-          post "/admin/config", params: { site_config: { auth_providers_to_enable: enabled },
-                                          confirmation: confirmation_message }
+          post admin_config_path, params: {
+            site_config: {
+              "#{provider}_key": "someKey",
+              "#{provider}_secret": "someSecret",
+              auth_providers_to_enable: enabled
+            },
+            confirmation: confirmation_message
+          }
           expect(SiteConfig.authentication_providers).to eq([provider])
+        end
+
+        it "does not update enabled authentication providers if any associated key missing" do
+          enabled = Authentication::Providers.available.first.to_s
+          post admin_config_path, params: {
+            site_config: {
+              "#{enabled}_key": "someKey",
+              "#{enabled}_secret": "",
+              auth_providers_to_enable: enabled
+            },
+            confirmation: confirmation_message
+          }
+          expect(SiteConfig.authentication_providers).to eq([])
+        end
+
+        it "enables proper domains to allow list" do
+          proper_list = "dev.to, forem.com, forem.dev"
+          post "/admin/config", params: { site_config: { allowed_registration_email_domains: proper_list },
+                                          confirmation: confirmation_message }
+          expect(SiteConfig.allowed_registration_email_domains).to eq(%w[dev.to forem.com forem.dev])
+        end
+
+        it "does not allow improper domain list" do
+          impproper_list = "dev.to, foremcom, forem.dev"
+          post "/admin/config", params: { site_config: { allowed_registration_email_domains: impproper_list },
+                                          confirmation: confirmation_message }
+          expect(SiteConfig.allowed_registration_email_domains).not_to eq(%w[dev.to foremcom forem.dev])
+        end
+
+        it "enables display_email_domain_allow_list_publicly" do
+          post "/admin/config", params: { site_config: { display_email_domain_allow_list_publicly: true },
+                                          confirmation: confirmation_message }
+          expect(SiteConfig.display_email_domain_allow_list_publicly).to be(true)
         end
 
         it "enables email authentication" do
@@ -124,18 +169,28 @@ RSpec.describe "/admin/config", type: :request do
           expect(SiteConfig.community_description).to eq(description)
         end
 
+        it "updates the community_emoji if valid" do
+          allow(SiteConfig).to receive(:community_emoji).and_call_original
+          emoji = "🥐"
+          post "/admin/config", params: { site_config: { community_emoji: emoji },
+                                          confirmation: confirmation_message }
+          expect(SiteConfig.community_emoji).to eq(emoji)
+        end
+
+        it "does not update the community_emoji if invalid" do
+          allow(SiteConfig).to receive(:community_emoji).and_call_original
+          not_an_emoji = "i love croissants"
+          expect do
+            post "/admin/config", params: { site_config: { community_emoji: not_an_emoji },
+                                            confirmation: confirmation_message }
+          end.not_to change(SiteConfig, :community_emoji)
+        end
+
         it "updates the community_name" do
           name_magoo = "Hey hey #{rand(100)}"
           post "/admin/config", params: { site_config: { community_name: name_magoo },
                                           confirmation: confirmation_message }
           expect(SiteConfig.community_name).to eq(name_magoo)
-        end
-
-        it "updates the collective_noun" do
-          collective_noun = "Rhumba"
-          post "/admin/config", params: { site_config: { collective_noun: collective_noun },
-                                          confirmation: confirmation_message }
-          expect(SiteConfig.collective_noun).to eq(collective_noun)
         end
 
         it "updates the community_member_label" do
@@ -181,16 +236,30 @@ RSpec.describe "/admin/config", type: :request do
       describe "Emails" do
         it "updates email_addresses" do
           expected_email_addresses = {
+            contact: "contact@example.com",
             business: "partners@example.com",
             privacy: "privacy@example.com",
             members: "members@example.com"
           }
-          post "/admin/config", params: { site_config: { email_addresses: expected_email_addresses },
-                                          confirmation: confirmation_message }
-          expect(SiteConfig.email_addresses[:privacy]).to eq("privacy@example.com")
+
+          post admin_config_path, params: {
+            site_config: { email_addresses: expected_email_addresses },
+            confirmation: confirmation_message
+          }
+
+          expect(SiteConfig.email_addresses[:contact]).to eq("contact@example.com")
           expect(SiteConfig.email_addresses[:business]).to eq("partners@example.com")
+          expect(SiteConfig.email_addresses[:privacy]).to eq("privacy@example.com")
           expect(SiteConfig.email_addresses[:members]).to eq("members@example.com")
-          expect(SiteConfig.email_addresses[:default]).to eq(ApplicationConfig["DEFAULT_EMAIL"])
+        end
+
+        it "does not update the default email address" do
+          post admin_config_path, params: {
+            site_config: { email_addresses: { default: "random@example.com" } },
+            confirmation: confirmation_message
+          }
+
+          expect(SiteConfig.email_addresses[:default]).not_to eq("random@example.com")
         end
       end
 
@@ -731,6 +800,12 @@ RSpec.describe "/admin/config", type: :request do
           post "/admin/config", params: { site_config: { sidebar_tags: "hey, haha,hoHo, Bobo Fofo" },
                                           confirmation: confirmation_message }
           expect(SiteConfig.sidebar_tags).to eq(%w[hey haha hoho bobofofo])
+        end
+
+        it "creates tags if they do not exist" do
+          post "/admin/config", params: { site_config: { sidebar_tags: "bobofogololo, spla, bla" },
+                                          confirmation: confirmation_message }
+          expect(Tag.find_by(name: "bobofogololo")).to be_valid
         end
       end
 
